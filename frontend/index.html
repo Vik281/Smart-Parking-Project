@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ParkShare | Smart Parking</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <header class="hero">
+        <div class="container">
+            <nav>
+                <a class="brand" href="/">Park<span>Share</span></a>
+                <span class="nav-label">Smart Parking</span>
+            </nav>
+            <div class="hero-content">
+                <p class="eyebrow">PARK SMARTER</p>
+                <h1>Your parking spot, <em>ready when you are.</em></h1>
+                <p class="subtitle">See live availability and reserve a space in just a few seconds.</p>
+            </div>
+        </div>
+    </header>
+
+    <main class="container">
+        <section id="parking">
+            <p class="section-label">LIVE AVAILABILITY</p>
+            <div class="section-heading">
+                <div>
+                    <h2>Available parking</h2>
+                    <p>Choose a location that works for you.</p>
+                </div>
+            </div>
+            <div id="locations" class="location-grid"></div>
+        </section>
+
+        <section id="booking-section" class="booking-section hidden">
+            <h2>Book your spot</h2>
+            <p id="selected-location"></p>
+            <form id="booking-form">
+                <label for="name">Your name</label>
+                <input id="name" required placeholder="e.g. Priya Sharma">
+
+                <label for="vehicle-number">Vehicle number</label>
+                <input id="vehicle-number" required placeholder="e.g. AB 12 CD 3456">
+
+                <button type="submit">Confirm booking</button>
+            </form>
+        </section>
+        <p id="message" class="message" aria-live="polite"></p>
+    </main>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
