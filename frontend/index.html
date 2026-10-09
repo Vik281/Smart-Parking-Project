@@ -18,19 +18,52 @@
                 <h1>Your parking spot, <em>ready when you are.</em></h1>
                 <p class="subtitle">See live availability and reserve a space in just a few seconds.</p>
             </div>
+            <div id="stats" class="stats-bar"></div>
         </div>
     </header>
 
     <main class="container">
+        <section id="how-it-works" class="how-it-works">
+            <p class="section-label">HOW IT WORKS</p>
+            <div class="steps">
+                <div class="step">
+                    <span class="step-number">1</span>
+                    <h3>Browse locations</h3>
+                    <p>Compare price, rating and amenities across live parking locations.</p>
+                </div>
+                <div class="step">
+                    <span class="step-number">2</span>
+                    <h3>Pick a spot</h3>
+                    <p>Choose any open spot from the live spot map for that location.</p>
+                </div>
+                <div class="step">
+                    <span class="step-number">3</span>
+                    <h3>Confirm &amp; go</h3>
+                    <p>Enter your details, confirm, and your spot is reserved instantly.</p>
+                </div>
+            </div>
+        </section>
+
         <section id="parking">
             <p class="section-label">LIVE AVAILABILITY</p>
             <div class="section-heading">
                 <div>
-                    <h2>Available parking</h2>
-                    <p>Choose a location that works for you.</p>
+                    <h2>Demo parking spaces</h2>
+                    <p>Choose an available parking spot to book.</p>
+                </div>
+                <div class="controls">
+                    <input id="search" type="search" placeholder="Search by name or area...">
+                    <select id="sort">
+                        <option value="default">Sort: Featured</option>
+                        <option value="price-asc">Price: Low to high</option>
+                        <option value="price-desc">Price: High to low</option>
+                        <option value="availability">Most available</option>
+                        <option value="rating">Top rated</option>
+                    </select>
                 </div>
             </div>
             <div id="locations" class="location-grid"></div>
+            <p id="no-results" class="no-results hidden">No parking locations match your search.</p>
         </section>
 
         <section id="booking-section" class="booking-section hidden">
@@ -47,6 +80,17 @@
             </form>
         </section>
         <p id="message" class="message" aria-live="polite"></p>
+
+        <section id="activity" class="activity-section">
+            <p class="section-label">LIVE ACTIVITY</p>
+            <div class="section-heading">
+                <div>
+                    <h2>What's happening now</h2>
+                    <p>Recent demo bookings and cancellations across all locations.</p>
+                </div>
+            </div>
+            <ul id="activity-feed" class="activity-feed"></ul>
+        </section>
     </main>
 
     <script src="/static/app.js"></script>
