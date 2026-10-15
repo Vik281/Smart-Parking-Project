@@ -1,30 +1,54 @@
-# ParkShare – Smart Parking Demo
+# ParkShare – Smart Parking
 
-A small FastAPI parking-booking demo built with Python, HTML, CSS, JavaScript, and in-memory data.
+A parking-booking web app built with FastAPI, SQLAlchemy and SQLite, with a plain HTML/CSS/JavaScript frontend.
+Users can browse parking locations, see live spot availability, book a specific spot and cancel a booking.
 
-## Run the demo
+## Features
 
-From the project folder, run:
+- Live spot map for each location showing free and booked spots
+- Book individual spots for a time slot and cancel bookings; data is saved in SQLite and survives restarts
+- Overlap detection plus a per-spot lock, so two simultaneous requests can never double-book a slot
+- Live stats (free/booked spots, average price) and a recent-activity feed
+- Search and sort locations by price, availability or rating
+
+## Project structure
+
+```
+app/
+  main.py        app setup: startup, routes, static files, error handling
+  config.py      settings (database URL from the DATABASE_URL env variable)
+  api/           HTTP routes – thin, they only call services
+  services/      business rules (booking, cancelling, stats)
+  models/        database tables (SQLAlchemy ORM)
+  schemas/       request/response validation (Pydantic)
+  database/      engine, per-request sessions, demo seed data
+frontend/        HTML, CSS and JavaScript served by FastAPI
+```
+
+## Run locally
 
 ```powershell
+python -m venv venv
+.\venv\Scripts\pip install -r requirements.txt
 .\venv\Scripts\uvicorn.exe app.main:app --reload
 ```
 
-Open http://127.0.0.1:8000 in your browser.
+Open http://127.0.0.1:8000. On first run the app creates `parkshare.db` and adds four demo locations.
+Delete that file to reset the data.
 
-## What to show the panel
+Interactive API docs are available at http://127.0.0.1:8000/docs.
 
-1. Open the ParkShare home page and enter a location or area.
-2. Click **Show parking** to display the demo parking spaces.
-3. Point out the available spots and hourly price on each parking card.
-4. Click **BOOK** for a location.
-5. Enter a name and vehicle number, then confirm the booking.
-6. Show the confirmation message and the available-spot count decreasing by one.
+## API
 
-## API routes
+| Method | Route | Description |
+|---|---|---|
+| GET | `/api/v1/health` | Health check |
+| GET | `/api/v1/locations?start=&end=` | All locations with spot availability for a time window (default: next hour) |
+| GET | `/api/v1/locations/{id}/spots/{spot_number}/bookings` | Upcoming bookings for one spot |
+| GET | `/api/v1/stats` | Totals for locations, spots and average price; occupancy is "right now" |
+| GET | `/api/v1/activity` | Recent bookings and cancellations |
+| POST | `/api/v1/locations/{id}/book` | Book a spot for `start_time`–`end_time` (`409` if it overlaps another booking) |
+| DELETE | `/api/v1/bookings/{booking_id}` | Cancel a booking |
 
-- `GET /api/v1/health` – confirms the backend is running.
-- `GET /api/v1/locations` – returns the hardcoded parking locations.
-- `POST /api/v1/locations/{location_id}/book` – books one in-memory parking spot.
-
-The parking data resets to its original values whenever the server restarts. This is intentional for the basic demo.
+Times must include a timezone (e.g. `2026-10-16T09:00:00+05:30` or `...Z`); they are stored in UTC.
+Bookings last 30 minutes to 24 hours and can be made up to 30 days ahead.

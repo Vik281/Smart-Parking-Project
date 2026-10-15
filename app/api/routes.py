@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends
+from pydantic import AwareDatetime
 from sqlalchemy.orm import Session
 
 from app.database.session import get_db
@@ -8,6 +9,7 @@ from app.schemas.parking import (
     BookingOut,
     CancelOut,
     LocationOut,
+    SpotBooking,
     StatsOut,
 )
 from app.services import parking_service
@@ -22,8 +24,21 @@ def health_check():
 
 
 @router.get("/locations", response_model=list[LocationOut])
-def get_locations(db: Session = Depends(get_db)):
-    return parking_service.list_locations(db)
+def get_locations(
+    start: AwareDatetime | None = None,
+    end: AwareDatetime | None = None,
+    db: Session = Depends(get_db),
+):
+    """Availability for the window [start, end); defaults to the next hour."""
+    return parking_service.list_locations(db, start, end)
+
+
+@router.get(
+    "/locations/{location_id}/spots/{spot_number}/bookings",
+    response_model=list[SpotBooking],
+)
+def get_spot_schedule(location_id: int, spot_number: str, db: Session = Depends(get_db)):
+    return parking_service.spot_schedule(db, location_id, spot_number)
 
 
 @router.get("/stats", response_model=StatsOut)
@@ -41,6 +56,7 @@ def book_spot(location_id: int, booking: BookingCreate, db: Session = Depends(ge
     return parking_service.book_spot(db, location_id, booking)
 
 
-@router.delete("/locations/{location_id}/book/{spot_number}", response_model=CancelOut)
-def cancel_booking(location_id: int, spot_number: str, db: Session = Depends(get_db)):
-    return parking_service.cancel_booking(db, location_id, spot_number)
+# A spot can now have many bookings, so a cancellation names the booking itself.
+@router.delete("/bookings/{booking_id}", response_model=CancelOut)
+def cancel_booking(booking_id: int, db: Session = Depends(get_db)):
+    return parking_service.cancel_booking(db, booking_id)

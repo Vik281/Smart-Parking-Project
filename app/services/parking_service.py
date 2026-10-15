@@ -1,7 +1,7 @@
-from datetime import datetime
+import math
+from datetime import datetime, timedelta
 
-from sqlalchemy import func, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import and_, func, select, update
 from sqlalchemy.orm import Session, selectinload
 
 from app.models import Booking, Location, Spot
@@ -11,11 +11,18 @@ from app.schemas.parking import (
     BookingOut,
     CancelOut,
     LocationOut,
+    SpotBooking,
     StatsOut,
 )
-from app.services.errors import ConflictError, NotFoundError
+from app.services.errors import BadRequestError, ConflictError, NotFoundError
+from app.timeutils import to_db_time, utc_now
 
 MAX_ACTIVITY_ITEMS = 8
+DEFAULT_WINDOW = timedelta(hours=1)
+MAX_DAYS_AHEAD = 30
+# The UI rounds the start time, and a request takes a moment to arrive, so a
+# start time a few minutes in the past is still accepted.
+PAST_START_GRACE = timedelta(minutes=5)
 
 
 def _get_location(db: Session, location_id: int) -> Location:
@@ -34,29 +41,65 @@ def _get_spot(db: Session, location_id: int, spot_number: str) -> Spot:
     return spot
 
 
-def _active_booking_for(db: Session, spot_id: int) -> Booking | None:
-    return db.scalar(
-        select(Booking).where(Booking.spot_id == spot_id, Booking.status == "active")
+def _overlaps(start: datetime, end: datetime):
+    """SQL condition: an active booking that overlaps [start, end).
+
+    Two intervals overlap exactly when each one starts before the other ends.
+    Because the intervals are half-open, back-to-back bookings (one ends at
+    11:00, the next starts at 11:00) do not overlap.
+    """
+    return and_(
+        Booking.status == "active",
+        Booking.start_time < end,
+        Booking.end_time > start,
     )
 
 
-def _available_spots(db: Session, location: Location) -> int:
-    booked = db.scalar(
-        select(func.count(Booking.id))
-        .join(Spot)
-        .where(Spot.location_id == location.id, Booking.status == "active")
+def _lock_spot(db: Session, spot_id: int) -> None:
+    """Stop two requests for the same spot from both passing the overlap check.
+
+    Without this, two requests can both run the check, both see nothing in the
+    way, and both insert: a double booking. Writing to the spot row first makes
+    the second request wait until the first has committed, so its check sees
+    the first booking.
+      * SQLite has no row locks; any write takes the database-wide write lock.
+      * PostgreSQL/MySQL lock just this spot's row, so other spots aren't blocked
+        (the same effect as SELECT ... FOR UPDATE).
+    """
+    db.execute(
+        update(Spot).where(Spot.id == spot_id).values(number=Spot.number),
+        execution_options={"synchronize_session": False},
     )
-    return len(location.spots) - booked
 
 
-def list_locations(db: Session) -> list[LocationOut]:
+def _resolve_window(start: datetime | None, end: datetime | None) -> tuple[datetime, datetime]:
+    """Time window to show availability for; defaults to the next hour."""
+    if (start is None) != (end is None):
+        raise BadRequestError("Provide both start and end, or neither")
+    if start is None:
+        start = utc_now()
+        return start, start + DEFAULT_WINDOW
+    start, end = to_db_time(start), to_db_time(end)
+    if end <= start:
+        raise BadRequestError("end must be after start")
+    return start, end
+
+
+def _price_for(hourly_price: int, start: datetime, end: datetime) -> int:
+    minutes = (end - start).total_seconds() / 60
+    return math.ceil(hourly_price * minutes / 60)  # round up to the next rupee
+
+
+def list_locations(
+    db: Session, start: datetime | None = None, end: datetime | None = None
+) -> list[LocationOut]:
+    start, end = _resolve_window(start, end)
+
     # Two queries total, however many locations exist (avoids the N+1 query problem).
     locations = db.scalars(
         select(Location).options(selectinload(Location.spots)).order_by(Location.id)
     ).all()
-    booked_spot_ids = set(
-        db.scalars(select(Booking.spot_id).where(Booking.status == "active")).all()
-    )
+    booked_spot_ids = set(db.scalars(select(Booking.spot_id).where(_overlaps(start, end))).all())
 
     result = []
     for location in locations:
@@ -77,16 +120,36 @@ def list_locations(db: Session) -> list[LocationOut]:
     return result
 
 
+def spot_schedule(db: Session, location_id: int, spot_number: str) -> list[SpotBooking]:
+    """Active bookings for one spot that haven't finished yet, soonest first."""
+    _get_location(db, location_id)
+    spot = _get_spot(db, location_id, spot_number)
+    bookings = db.scalars(
+        select(Booking)
+        .where(Booking.spot_id == spot.id, Booking.status == "active", Booking.end_time > utc_now())
+        .order_by(Booking.start_time)
+    ).all()
+    return [
+        SpotBooking(booking_id=b.id, start_time=b.start_time, end_time=b.end_time)
+        for b in bookings
+    ]
+
+
 def get_stats(db: Session) -> StatsOut:
+    now = utc_now()
     location_count = db.scalar(select(func.count(Location.id)))
     total_spots = db.scalar(select(func.count(Spot.id)))
-    booked_spots = db.scalar(select(func.count(Booking.id)).where(Booking.status == "active"))
+    occupied_now = db.scalar(
+        select(func.count(func.distinct(Booking.spot_id))).where(
+            Booking.status == "active", Booking.start_time <= now, Booking.end_time > now
+        )
+    )
     avg_price = db.scalar(select(func.avg(Location.price))) or 0
     return StatsOut(
         locations=location_count,
         total_spots=total_spots,
-        available_spots=total_spots - booked_spots,
-        booked_spots=booked_spots,
+        available_spots=total_spots - occupied_now,
+        booked_spots=occupied_now,
         avg_price=round(avg_price, 2),
     )
 
@@ -116,19 +179,32 @@ def book_spot(db: Session, location_id: int, data: BookingCreate) -> BookingOut:
     location = _get_location(db, location_id)
     spot = _get_spot(db, location_id, data.spot_number)
 
-    # Fast, friendly check for the common case...
-    if _active_booking_for(db, spot.id):
-        raise ConflictError("This spot is already booked")
+    start, end = to_db_time(data.start_time), to_db_time(data.end_time)
+    now = utc_now()
+    if start < now - PAST_START_GRACE:
+        raise BadRequestError("Start time is in the past")
+    if start > now + timedelta(days=MAX_DAYS_AHEAD):
+        raise BadRequestError(f"Bookings can be made at most {MAX_DAYS_AHEAD} days ahead")
 
-    booking = Booking(spot_id=spot.id, name=data.name, vehicle_number=data.vehicle_number)
+    # Lock first, then check, then insert, all in one transaction.
+    _lock_spot(db, spot.id)
+    clash = db.scalar(
+        select(Booking.id).where(Booking.spot_id == spot.id, _overlaps(start, end)).limit(1)
+    )
+    if clash is not None:
+        db.rollback()  # release the lock straight away
+        raise ConflictError("This spot is already booked for part of that time")
+
+    booking = Booking(
+        spot_id=spot.id,
+        name=data.name,
+        vehicle_number=data.vehicle_number,
+        start_time=start,
+        end_time=end,
+        total_price=_price_for(location.price, start, end),
+    )
     db.add(booking)
-    try:
-        db.commit()
-    except IntegrityError:
-        # ...but if two requests pass the check at the same moment, the unique
-        # index rejects the second insert. The database is the final authority.
-        db.rollback()
-        raise ConflictError("This spot is already booked")
+    db.commit()
 
     return BookingOut(
         message="Spot booked!",
@@ -137,26 +213,29 @@ def book_spot(db: Session, location_id: int, data: BookingCreate) -> BookingOut:
         name=booking.name,
         vehicle_number=booking.vehicle_number,
         spot_number=spot.number,
-        available_spots=_available_spots(db, location),
+        start_time=booking.start_time,
+        end_time=booking.end_time,
+        total_price=booking.total_price,
     )
 
 
-def cancel_booking(db: Session, location_id: int, spot_number: str) -> CancelOut:
-    location = _get_location(db, location_id)
-    spot = _get_spot(db, location_id, spot_number)
-
-    booking = _active_booking_for(db, spot.id)
+def cancel_booking(db: Session, booking_id: int) -> CancelOut:
+    booking = db.get(Booking, booking_id)
     if booking is None:
-        raise NotFoundError("No booking found for this spot")
+        raise NotFoundError("Booking not found")
+    if booking.status == "cancelled":
+        raise ConflictError("This booking is already cancelled")
+    if booking.end_time <= utc_now():
+        raise ConflictError("This booking has already ended")
 
     # Soft delete: keep the row for history and the activity feed.
     booking.status = "cancelled"
-    booking.cancelled_at = datetime.now()
+    booking.cancelled_at = utc_now()
     db.commit()
 
     return CancelOut(
         message="Booking cancelled",
-        location=location.name,
-        spot_number=spot.number,
-        available_spots=_available_spots(db, location),
+        booking_id=booking.id,
+        location=booking.spot.location.name,
+        spot_number=booking.spot.number,
     )

@@ -33,8 +33,8 @@
                 </div>
                 <div class="step">
                     <span class="step-number">2</span>
-                    <h3>Pick a spot</h3>
-                    <p>Choose any open spot from the live spot map for that location.</p>
+                    <h3>Pick a time and spot</h3>
+                    <p>Choose when you'll arrive and how long you'll stay, then pick an open spot.</p>
                 </div>
                 <div class="step">
                     <span class="step-number">3</span>
@@ -49,9 +49,19 @@
             <div class="section-heading">
                 <div>
                     <h2>Demo parking spaces</h2>
-                    <p>Choose an available parking spot to book.</p>
+                    <p>Pick when you need parking, then choose a spot that's free for that time.</p>
                 </div>
                 <div class="controls">
+                    <input id="window-start" type="datetime-local" step="900" aria-label="Parking from">
+                    <select id="window-hours" aria-label="Duration">
+                        <option value="0.5">30 min</option>
+                        <option value="1" selected>1 hour</option>
+                        <option value="2">2 hours</option>
+                        <option value="3">3 hours</option>
+                        <option value="4">4 hours</option>
+                        <option value="8">8 hours</option>
+                        <option value="24">24 hours</option>
+                    </select>
                     <input id="search" type="search" placeholder="Search by name or area...">
                     <select id="sort">
                         <option value="default">Sort: Featured</option>
@@ -69,6 +79,8 @@
         <section id="booking-section" class="booking-section hidden">
             <h2>Book your spot</h2>
             <p id="selected-location"></p>
+            <p class="spot-label">Upcoming bookings for this spot</p>
+            <ul id="spot-schedule" class="spot-schedule"></ul>
             <form id="booking-form">
                 <label for="name">Your name</label>
                 <input id="name" required placeholder="e.g. Priya Sharma">

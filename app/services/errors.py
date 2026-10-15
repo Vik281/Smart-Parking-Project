@@ -9,6 +9,10 @@ class ServiceError(Exception):
         self.detail = detail
 
 
+class BadRequestError(ServiceError):
+    status_code = 400
+
+
 class NotFoundError(ServiceError):
     status_code = 404
 

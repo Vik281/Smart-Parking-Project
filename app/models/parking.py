@@ -1,9 +1,10 @@
 from datetime import datetime
 
-from sqlalchemy import JSON, ForeignKey, Index, String, UniqueConstraint, text
+from sqlalchemy import JSON, CheckConstraint, ForeignKey, Index, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.session import Base
+from app.timeutils import utc_now
 
 
 class Location(Base):
@@ -36,23 +37,26 @@ class Spot(Base):
 class Booking(Base):
     __tablename__ = "bookings"
     __table_args__ = (
-        # At most one *active* booking per spot, enforced by the database itself.
-        # This is what actually prevents double booking when two requests race.
-        Index(
-            "uq_one_active_booking_per_spot",
-            "spot_id",
-            unique=True,
-            sqlite_where=text("status = 'active'"),
-            postgresql_where=text("status = 'active'"),
-        ),
+        # The database refuses a booking that ends before it starts, even if a bug
+        # in the application lets one through.
+        CheckConstraint("end_time > start_time", name="ck_booking_ends_after_start"),
+        # The overlap check filters by spot and time on every booking, so index it.
+        Index("ix_bookings_spot_time", "spot_id", "start_time"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     spot_id: Mapped[int] = mapped_column(ForeignKey("spots.id"))
     name: Mapped[str] = mapped_column(String(60))
     vehicle_number: Mapped[str] = mapped_column(String(20))
+    # Half-open interval [start_time, end_time): a booking ending at 11:00 does
+    # not clash with one starting at 11:00. Stored as naive UTC (see timeutils).
+    start_time: Mapped[datetime]
+    end_time: Mapped[datetime]
+    # Price is copied at booking time, so changing a location's hourly rate
+    # later never changes what an existing customer owes.
+    total_price: Mapped[int]
     status: Mapped[str] = mapped_column(String(20), default="active")  # active | cancelled
-    created_at: Mapped[datetime] = mapped_column(default=datetime.now)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now)
     cancelled_at: Mapped[datetime | None] = mapped_column(default=None)
 
     spot: Mapped[Spot] = relationship(back_populates="bookings")
